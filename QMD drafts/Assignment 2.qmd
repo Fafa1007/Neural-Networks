@@ -1,0 +1,38 @@
+```{r}
+Collider_Data <- read.csv("Collider_Data_2025.txt", sep="")
+```
+
+# Question a)
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+df <- data.frame(Collider_Data)
+df_long <- df %>%
+  pivot_longer(cols = starts_with("Y"), names_to = "Particle", values_to = "Value") %>%
+  filter(Value == 1)
+
+# Rename particle types for clarity
+df_long$Particle <- recode(df_long$Particle,
+                           Y1 = "Alpha",
+                           Y2 = "Beta",
+                           Y3 = "Rho")
+
+# Plot X1 vs X2 colored by particle type
+ggplot(df_long, aes(x = X1, y = X2, color = Particle)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Feature Space: X1 vs X2 Colored by Particle Type",
+       x = "X1",
+       y = "X2")
+```
+
+# Question b)
+
+```{r}
+softmax_apply2 <- function(Z) {
+  t(apply(Z, 2, function(z) exp(z) / sum(exp(z))))
+}
+```

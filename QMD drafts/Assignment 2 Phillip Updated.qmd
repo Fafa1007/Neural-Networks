@@ -1,0 +1,188 @@
+---
+title: "Assignment 2"
+---
+
+```{r}
+#| message: false
+#| warning: false
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+
+
+data <- read.table("Collider_Data_2025.txt", header = TRUE)
+```
+
+### Plotting the Coordinates of Each Particle, and Colouring Coding Based on Particle Type
+
+```{r}
+
+class <- factor(ifelse(data$Y1 == 1, "alpha", 
+                ifelse(data$Y2 == 1, "beta","rho")))
+  
+Q1_plot <- ggplot() + 
+  geom_point(data = data, aes(x= X1, y = X2, color = class)) + 
+  theme_minimal() +
+  labs(
+    title = "Particle Scattering in Feature Space",
+    x     = "X1 (first coordinate in cross-section)",
+    y     = "X2 (second coordinate in cross-section)",
+    color = "Particle Type"
+  )
+
+ggsave(filename = "Q1_plot.png")
+```
+
+If differentiating between alpha and beta particles, a linear decision boundary could have been appropriate. However, differentiating between rho particles and the others would require a nonliner decision boundary. This means that nonlinear machinery is definitely an apporpriate model class for thsi problem. There , both alpha and beta particualrs curve around the rho particles, and there is no straight line that can seperat these curved regions, which suggest that we need nonlinear machinery like a neural network.
+
+### Soft-Max Activation Function in Matrix Form
+
+```{r}
+
+# where Z is a dL x N matrix that contains the z values for each node in the output layer for each observation
+
+Z <- matrix(c(1,2,4,3,5,6,8,7,9,10), nrow = 2)
+
+softmax <- function(Z){ 
+  
+  Z_exp <- exp(Z)
+  A_1 <- Z_exp * t(as.matrix(1/colSums(Z_exp), ncol = nrow(Z_exp), byrow = FALSE) %*% matrix(1,ncol = nrow(Z_exp)))
+  
+  return(t(A_1))
+}
+
+softmax(Z)
+
+```
+
+### Cross Entropy Error Function
+
+```{r}
+g <- function(Yhat, Y) {
+  true_class_col <- max.col(Y)
+  prob <- Yhat[1:nrow(Yhat),true_class_col]
+  
+  return(-mean(log(prob)))
+}
+  
+Y <- matrix(c(1,0,0,0,1,0,0,0,1), nrow = 3)
+Yhat <- matrix(c(0.5,0.2,0.3,0.3,0.5,0.2,0.2,0.3,0.5), nrow = 3)  
+g(Yhat,Y)
+```
+
+### Forward Pass of an (m,m)AFnetwork
+
+```{r}
+# Specify activation functions for the hidden and output layers:
+sig1 = function(z) {tanh(z)}  #1/(1+exp(-z))
+sig2 = function(z) {tanh(z)}
+sig3 = function(z) {tanh(z)}
+
+## Neural Network
+
+neural_net = function(X, Y, theta, m, nu)
+{
+	 # Relevant dimensional variables:
+   N = dim(X)[1]
+   p = dim(X)[2]
+   q = dim(Y)[2]
+   a = p 
+   Z = matrix(NA, nrow = q, ncol = N)
+   # Populate weight-matrix and bias vectors:
+   
+   index = 1:(p*a)
+   W1    = matrix(theta[index],p,a)
+   index = max(index)+1:((p+a)*m)
+   W2    = matrix(theta[index],p+a,m)
+   index = max(index)+1:(m*m)
+   W3    = matrix(theta[index],m,m)
+   index = max(index)+1:(m*q)
+   W4    = matrix(theta[index],m,q)
+   
+   index = max(index)+1:a
+   b1    = matrix(theta[index],a,1)
+   index = max(index)+1:m
+   b2    = matrix(theta[index],m,1)
+   index = max(index)+1:m
+   b3    = matrix(theta[index],m,1)
+   index = max(index)+1:q
+   b4    = matrix(theta[index],q,1)
+
+   # Evaluate network:
+   Yhat  = matrix(NA,N,q)
+   error = rep(NA,N)
+   
+   for(i in 1:N)
+   {
+   	  a0 = matrix(X[i,],p,1)
+   	  
+   	  z1 = t(W1) %*% a0 + b1
+   	  a1 = sig1(z1)
+   	  
+   	  z2 = t(W2)%*% rbind(a0,a1) + b2
+   	  a2 = sig2(z2)
+   	  
+   	  z3 = t(W3) %*% a2 + b3
+   	  a3 = sig3(z3)
+   	  
+   	  z4 = t(W4) %*% a3 + b4
+   	  Z[,i] = z4
+   }
+   A_L = softmax(Z)
+     
+   Yhat  = A_L
+   error = g(Yhat,Y)
+
+   # Calculate error:
+   E1 = error
+   E2 = E1+nu*(sum(W1^2) + sum(W2^2) + sum(W3^2) + sum(W4^2))/N # modified objective/penalised objective
+   
+   # Return predictions and error:
+   return(list(Yhat = Yhat, E1 = E1, E2 = E2))
+}
+
+X <- as.matrix(data[,1:3])
+Y <- as.matrix(data[,4:6])
+theta <- runif(75,min = -1,max = 1)
+results <- neural_net(X,Y,theta,m = 4, nu = 0)
+```
+
+```{r}
+library(ggplot2)
+set.seed(2025)
+
+cross_validation <- function(k,X,Y,theta){
+  n_val <- 15
+  nu_val <- exp(seq(-6,2,length = n_val ))
+  CV_Error <- c()  
+  for (v in 1:n_val) {
+    errors <- c()
+      for (i in 1:k) { 
+        indices <- 1:nrow(X)
+      
+        index_train <- sample(indices,0.8*nrow(X),replace = FALSE)
+        training_X <- X[index_train,]
+        training_Y <- Y[index_train,]
+      
+        index_test <- indices[-index_train]
+        test_X <- X[index_test,]
+        test_Y <- Y[index_test,]
+        
+        
+        res <- optim(theta, function(X, Y, theta, m, nu) {neural_net(X, Y, theta, m, nu)$E2}, X = training_X, Y = training_Y, m = 4, nu = nu_val[v])
+        
+        errors[i] <- res$value
+      
+      }
+      CV_Error[v] <- mean(errors)
+    }
+    result <- cbind("Nu Values" = nu_val, "CV Errors"= CV_Error)
+    return(result)
+}
+
+CV_results <- cross_validation(k=10,X,Y, theta)
+colnames(CV_results) <- c("Nu_Values","CV_Error")
+
+ggplot() + geom_line(data = as.data.frame(CV_results), aes(x = Nu_Values, y = CV_Error))
+```

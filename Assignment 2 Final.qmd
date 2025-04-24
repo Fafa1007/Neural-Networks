@@ -1,0 +1,298 @@
+---
+title: "Assignment 2"
+---
+
+```{r}
+#| message: false
+#| warning: false
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+
+
+data <- read.table("Collider_Data_2025.txt", header = TRUE)
+```
+
+### Plotting the Coordinates of Each Particle, and Colouring Coding Based on Particle Type
+
+```{r}
+
+class <- factor(ifelse(data$Y1 == 1, "alpha", 
+                ifelse(data$Y2 == 1, "beta","rho")))
+  
+Q1_plot <- ggplot() + 
+  geom_point(data = data, aes(x= X1, y = X2, color = class)) + 
+  theme_minimal() +
+  labs(
+    title = "Particle Scattering in Feature Space",
+    x     = "X1 (first coordinate in cross-section)",
+    y     = "X2 (second coordinate in cross-section)",
+    color = "Particle Type"
+  )
+
+ggsave(filename = "Q1_plot.png")
+```
+
+If differentiating between alpha and beta particles, a linear decision boundary could have been appropriate. However, differentiating between rho particles and the others would require a nonliner decision boundary. This means that nonlinear machinery is definitely an apporpriate model class for thsi problem. There , both alpha and beta particualrs curve around the rho particles, and there is no straight line that can seperat these curved regions, which suggest that we need nonlinear machinery like a neural network.
+
+### Soft-Max Activation Function in Matrix Form
+
+```{r}
+
+# where Z is a dL x N matrix that contains the z values for each node in the output layer for each observation
+
+Z <- matrix(c(1,2,4,3,5,6,8,7,9,10), nrow = 2)
+
+softmax <- function(Z){ 
+  
+  Z_exp <- exp(Z)
+  A_1 <- Z_exp * t(as.matrix(1/colSums(Z_exp), ncol = nrow(Z_exp), byrow = FALSE) %*% matrix(1,ncol = nrow(Z_exp)))
+  
+  return(t(A_1))
+}
+
+softmax(Z)
+
+```
+
+### Cross Entropy Error Function
+
+```{r}
+g <- function(Yhat, Y) {
+  true_class_col <- max.col(Y)
+  
+  rc_pairs <- cbind(seq_len(nrow(Yhat)), true_class_col)
+
+  prob <- Yhat[rc_pairs]
+  
+  return(-mean(log(prob)))
+}
+  
+Y <- matrix(c(1,0,0,0,1,0,0,0,1), nrow = 3)
+Yhat <- matrix(c(0.5,0.2,0.3,0.3,0.5,0.2,0.2,0.3,0.5), nrow = 3)  
+g(Yhat,Y)
+```
+
+### Forward Pass of an (m,m)AFnetwork
+
+```{r}
+# Specify activation functions for the hidden and output layers:
+sig1 = function(z) {tanh(z)}  #1/(1+exp(-z))
+sig2 = function(z) {tanh(z)}
+sig3 = function(z) {tanh(z)}
+
+## Neural Network
+
+neural_net = function(X, Y, theta, m, nu)
+{
+	 # Relevant dimensional variables:
+   N = dim(X)[1]
+   p = dim(X)[2]
+   q = dim(Y)[2]
+   a = p 
+   Z = matrix(NA, nrow = q, ncol = N)
+   # Populate weight-matrix and bias vectors:
+   
+   index = 1:(p*a)
+   W1    = matrix(theta[index],p,a)
+   index = max(index)+1:((p+a)*m)
+   W2    = matrix(theta[index],p+a,m)
+   index = max(index)+1:(m*m)
+   W3    = matrix(theta[index],m,m)
+   index = max(index)+1:(m*q)
+   W4    = matrix(theta[index],m,q)
+   
+   index = max(index)+1:a
+   b1    = matrix(theta[index],a,1)
+   index = max(index)+1:m
+   b2    = matrix(theta[index],m,1)
+   index = max(index)+1:m
+   b3    = matrix(theta[index],m,1)
+   index = max(index)+1:q
+   b4    = matrix(theta[index],q,1)
+
+   # Evaluate network:
+   Yhat  = matrix(NA,N,q)
+   error = rep(NA,N)
+   
+   for(i in 1:N)
+   {
+   	  a0 = matrix(X[i,],p,1)
+   	  
+   	  z1 = t(W1) %*% a0 + b1
+   	  a1 = sig1(z1)
+   	  
+   	  z2 = t(W2)%*% rbind(a0,a1) + b2
+   	  a2 = sig2(z2)
+   	  
+   	  z3 = t(W3) %*% a2 + b3
+   	  a3 = sig3(z3)
+   	  
+   	  z4 = t(W4) %*% a3 + b4
+   	  Z[,i] = z4
+   }
+   A_L = softmax(Z)
+     
+   Yhat  = A_L
+   error = g(Yhat,Y)
+
+   # Calculate error:
+   E1 = error
+   E2 = E1+nu*(sum(W1^2) + sum(W2^2) + sum(W3^2) + sum(W4^2))/N # modified objective/penalised objective
+   
+   # Return predictions and error:
+   return(list(Yhat = Yhat, E1 = E1, E2 = E2))
+}
+
+X <- as.matrix(data[,1:3])
+Y <- as.matrix(data[,4:6])
+theta <- runif(75,min = -1,max = 1)
+results <- neural_net(X,Y,theta,m = 4, nu = 0)
+```
+
+# Cross K Fold Validation
+
+```{r}
+library(ggplot2)
+set.seed(2025)
+
+cross_validation <- function(k,X,Y,theta){
+  n_val <- 10
+  nu_val <- exp(seq(-6,2,length = n_val ))
+  CV_Errors <- c()
+  
+  for(i in 1:k){
+    errors <- c()
+    indices <- 1:nrow(X)
+      
+    index_train <- sample(indices,0.8*nrow(X),replace = FALSE)
+    training_X <- X[index_train,]
+    training_Y <- Y[index_train,]
+  
+    index_test <- indices[-index_train]
+    test_X <- X[index_test,]
+    test_Y <- Y[index_test,]
+    
+    for (v in 1:n_val) { 
+        print(c(i,v))
+        theta <- runif(75,min = -1,max = 1)
+        
+        params <- optim(theta, fn = \(theta) neural_net(training_X, training_Y, theta, m=4, nu=nu_val[v])$E2, method = "BFGS")
+
+        # params <- optim(theta, function(X, Y, theta, m, nu) {return(neural_net(X, Y, theta, m, nu)$E2)}, X = training_X, Y = training_Y, m = 4, nu = nu_val[v], method = "BFGS")
+        
+        results <- neural_net(X = test_X,Y = test_Y, theta = params$par, m = 4, nu = nu_val[v])
+        errors[v] <- results$E1
+       }
+    CV_Errors <- cbind(CV_Errors,errors)
+  }
+  CV_Errors <- rowMeans(CV_Errors)
+  result <- cbind("Nu Values" = nu_val, "CV Errors"= CV_Errors)
+  return(result)
+}
+
+CV_results <- cross_validation(k=3,X,Y, theta)
+colnames(CV_results) <- c("Nu_Values","CV_Error")
+
+optimal_nu_index <- which.min(CV_results[,2])
+optim_nu <- CV_results[optimal_nu_index,1]
+optim_nu <- unname(optim_nu)
+
+ggplot() + geom_line(data = as.data.frame(CV_results), aes(x = Nu_Values, y = CV_Error)) + theme_minimal()+
+  geom_vline(xintercept = optim_nu, linetype = "dashed", color = "red") +
+  annotate("text",x=optim_nu, y=-Inf, label = paste0("Nu Value = ", round(optim_nu,3)), vjust = -0.6, size = 3, hjust = -0.1, color = "red")
+
+
+ggsave(filename = "Test2 Validation Plot.png")  
+save(CV_results, file = "Test2 CV Errors.RData")
+```
+
+### Response Curves
+
+```{r}
+res <- 1000
+x1_seq <- seq(min(data$X1), max(data$X1), length.out = res)
+x2_seq <- seq(min(data$X2), max(data$X2), length.out = res)
+
+# full grid
+grid <- expand.grid(
+  X1 = x1_seq,
+  X2 = x2_seq,
+  X3 = c(0,1)
+)
+
+# dummy Y (not used by forward‐only pass)
+dummy_Y <- matrix(0, nrow = nrow(grid), ncol = 3)
+
+# optim_theta <- optim(theta, function(X, Y, theta, m, nu) {neural_net(X, Y, theta, m, nu)$E2}, X = X, Y = Y, m = 4, nu = optim_nu)$par
+
+# # run forward‐pass: assumes neural_net returns a list with element $y_hat
+# out    <- neural_net(
+#   X     = as.matrix(grid[,c("X1","X2","X3")]),
+#   Y     = dummy_Y,
+#   theta = optim_theta,
+#   m     = 4,
+#   nu    = optim_nu
+# )
+
+theta_final <- runif(75, -1, 1)
+opt_final <- optim(theta_final, fn = \(theta) neural_net(X, Y, theta, m=4, nu=optim_nu)$E2, method = "BFGS")
+
+# Generate response curves with the test set model
+out <- neural_net(
+  X = as.matrix(grid[, c("X1", "X2", "X3")]),
+  Y = dummy_Y,
+  theta = opt_final$par,  # Use theta from training set
+  m = 4,
+  nu = optim_nu
+)
+probs  <- out$Yhat   # matrix nrow(grid) × 3
+
+# assign predicted class
+grid$pred <- factor(
+  apply(probs, 1, which.max),
+  levels = 1:3,
+  labels = c("alpha","beta","rho")
+)
+
+# Split grid by X3 and plot separately
+
+grid0 <- subset(grid, X3 == 0)
+grid1 <- subset(grid, X3 == 1)
+
+# Plot for X3 = 0
+p0 <- ggplot(grid0, aes(x = X1, y = X2, fill = pred)) +
+  geom_tile() +
+  coord_equal() +
+  labs(
+    title    = "Response Regions for Detector B (X3 = 0)",
+    subtitle = "Predicted particle class",
+    x        = "X1",
+    y        = "X2",
+    fill     = "Class"
+  ) +
+  theme_minimal()
+
+# Plot for X3 = 1
+p1 <- ggplot(grid1, aes(x = X1, y = X2, fill = pred)) +
+  geom_tile() +
+  coord_equal() +
+  labs(
+    title    = "Response Regions for Detector A (X3 = 1)",
+    subtitle = "Predicted particle class",
+    x        = "X1",
+    y        = "X2",
+    fill     = "Class"
+  ) +
+  theme_minimal()
+
+# display
+print(p0)
+print(p1)
+
+ggsave(p0, filename = "#2 Predictions Detector B (X3=0) Plot.png")  
+ggsave(p1, filename = "#2 Predictions Detector A (X3=1) Plot.png")  
+
+
+```
