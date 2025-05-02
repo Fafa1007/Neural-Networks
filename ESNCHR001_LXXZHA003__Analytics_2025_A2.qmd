@@ -11,7 +11,7 @@ library(knitr)
 library(ggplot2)
 
 
-data <- read.table("Collider_Data_2025.txt", header = TRUE)
+data <- read.table("Collider_Data_2025.txt", header = TRUE,stringsAsFactors =TRUE)
 ```
 
 ### Plotting the Coordinates of Each Particle, and Colouring Coding Based on Particle Type
